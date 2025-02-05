@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JobHack.io</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://apis.google.com/js/api.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+    <header class="bg-blue-600 text-white py-6">
+        <div class="container mx-auto px-4">
+            <h1 class="text-3xl font-bold">JobHack.io</h1>
+        </div>
+    </header>
+
+    <main class="flex-grow container mx-auto px-4 py-8">
+        <section class="bg-white rounded-lg shadow-md p-6 mb-8">
+            <h2 class="text-2xl font-semibold mb-4">Find Matching Candidates</h2>
+            <form id="candidate-search-form" class="space-y-4">
+                <div>
+                    <label for="skills" class="block text-sm font-medium text-gray-700">Skills (comma-separated)</label>
+                    <input type="text" id="skills" name="skills" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50">
+                </div>
+                <div>
+                    <label for="experience" class="block text-sm font-medium text-gray-700">Minimum Years of Experience</label>
+                    <input type="number" id="experience" name="experience" min="0" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50">
+                </div>
+                <div class="flex space-x-4">
+                    <div class="flex-1">
+                        <label for="min-salary" class="block text-sm font-medium text-gray-700">Minimum Monthly Salary</label>
+                        <input type="number" id="min-salary" name="min-salary" min="0" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50">
+                    </div>
+                    <div class="flex-1">
+                        <label for="max-salary" class="block text-sm font-medium text-gray-700">Maximum Monthly Salary</label>
+                        <input type="number" id="max-salary" name="max-salary" min="0" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50">
+                    </div>
+                </div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+                    Find Candidates
+                </button>
+            </form>
+        </section>
+
+        <section id="results" class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-2xl font-semibold mb-4">Matching Candidates</h2>
+            <div id="candidates-list" class="space-y-4">
+                <!-- Matching candidates will be displayed here -->
+            </div>
+        </section>
+    </main>
+
+    <footer class="bg-gray-800 text-white py-4">
+        <div class="container mx-auto px-4 text-center">
+            <p>&copy; 2024 JobHack.io. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const SHEET_ID = '1Rkm0_0qZCrPcYMiNBNrXxiPLvvZXtXbXtlMb_oDxrJg';
+            const RANGE = 'Sheet1!A:D'; // Adjust this range as needed
+
+            // Load the Google Sheets API client
+            gapi.load('client', initClient);
+
+            function initClient() {
+                // Replace this with the content of your JSON key file
+
+                const serviceAccountKey = require('./credentials.json');
+
+
+                gapi.client.init({
+                    apiKey: null, // We're not using an API key
+                    discoveryDocs: ['https://sheets.googleapis.com/$discovery/rest?version=v4'],
+                }).then(function() {
+                    // Use JWT auth
+                    gapi.auth.setToken({
+                        access_token: generateJWT(serviceAccountKey)
+                    });
+                }).catch(console.error);
+            }
+
+            function generateJWT(serviceAccountKey) {
+                // This is a simplified JWT generation. In a production environment,
+                // you should use a proper JWT library.
+                const header = btoa(JSON.stringify({
+                    alg: 'RS256',
+                    typ: 'JWT'
+                }));
+                const now = Math.floor(Date.now() / 1000);
+                const claim = btoa(JSON.stringify({
+                    iss: serviceAccountKey.client_email,
+                    scope: 'https://www.googleapis.com/auth/spreadsheets.readonly',
+                    aud: 'https://oauth2.googleapis.com/token',
+                    exp: now + 3600,
+                    iat: now
+                }));
+                
+                // Note: This is a placeholder. You need to implement proper RS256 signing.
+                const signature = btoa('signature_placeholder');
+
+                return `${header}.${claim}.${signature}`;
+            }
+
+            async function fetchCandidates() {
+                try {
+                    const response = await gapi.client.sheets.spreadsheets.values.get({
+                        spreadsheetId: SHEET_ID,
+                        range: RANGE,
+                    });
+                    const values = response.result.values;
+                    if (!values) {
+                        throw new Error('No data found.');
+                    }
+                    const [headers, ...rows] = values;
+                    return rows.map(row => {
+                        const candidate = {};
+                        headers.forEach((header, index) => {
+                            candidate[header.toLowerCase().replace(/ /g, '_')] = row[index];
+                        });
+                        return candidate;
+                    });
+                } catch (error) {
+                    console.error('Error in fetchCandidates:', error);
+                    throw error;
+                }
+            }
+            
+            function filterCandidates(candidates, skills, experience, minSalary, maxSalary) {
+                return candidates.filter(candidate => {
+                    const candidateSkills = candidate.skills_attributes.toLowerCase().split(',').map(s => s.trim());
+                    const requiredSkills = skills.toLowerCase().split(',').map(s => s.trim());
+                    const hasSkills = requiredSkills.every(skill => candidateSkills.includes(skill));
+                    const expMatch = parseInt(candidate.years_of_exp) >= parseInt(experience);
+                    const salaryMatch = parseInt(candidate.monthly_salary) >= parseInt(minSalary) &&
+                                        parseInt(candidate.monthly_salary) <= parseInt(maxSalary);
+                    return hasSkills && expMatch && salaryMatch;
+                });
+            }
+
+            function displayCandidates(candidates) {
+                const candidatesList = document.getElementById('candidates-list');
+                candidatesList.innerHTML = '';
+
+                if (candidates.length === 0) {
+                    candidatesList.innerHTML = '<p class="text-gray-600">No matching candidates found.</p>';
+                    return;
+                }
+
+                candidates.forEach(candidate => {
+                    const candidateElement = document.createElement('div');
+                    candidateElement.className = 'bg-gray-50 p-4 rounded-lg';
+                    candidateElement.innerHTML = `
+                        <h3 class="text-lg font-semibold">${candidate.name}</h3>
+                        <p><strong>Skills:</strong> ${candidate.skills_attributes}</p>
+                        <p><strong>Experience:</strong> ${candidate.years_of_exp} years</p>
+                        <p><strong>Monthly Salary:</strong> $${candidate.monthly_salary}</p>
+                    `;
+                    candidatesList.appendChild(candidateElement);
+                });
+            }
+
+            document.getElementById('candidate-search-form').addEventListener('submit', async function(e) {
+                e.preventDefault();
+                const skills = document.getElementById('skills').value;
+                const experience = document.getElementById('experience').value;
+                const minSalary = document.getElementById('min-salary').value;
+                const maxSalary = document.getElementById('max-salary').value;
+
+                document.getElementById('candidates-list').innerHTML = '<p class="text-gray-600">Searching for candidates...</p>';
+
+                try {
+                    const allCandidates = await fetchCandidates();
+                    const matchingCandidates = filterCandidates(allCandidates, skills, experience, minSalary, maxSalary);
+                    displayCandidates(matchingCandidates);
+                } catch (error) {
+                    console.error('Error fetching or processing candidates:', error);
+                    document.getElementById('candidates-list').innerHTML = '<p class="text-red-600">An error occurred while fetching candidates. Please try again later.</p>';
+                }
+            });
+        });
+    </script>
+</body>
+</html>
